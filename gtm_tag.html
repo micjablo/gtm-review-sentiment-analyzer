@@ -1,0 +1,101 @@
+<!--
+GTM Review Sentiment Analyzer
+Author: micjablo (https://github.com/micjablo)
+Repository: https://github.com/micjablo/gtm-review-sentiment-analyzer
+License: GPL-3.0
+
+Setup:
+1. Replace {{REVIEW_TEXT_VARIABLE}} with your GTM variable containing the review text
+2. Replace {{CLOUD_FUNCTION_URL}} with your GTM variable containing the Cloud Function URL
+3. Set appropriate trigger (typically review submission)
+
+Example implementation:
+- {{REVIEW_TEXT_VARIABLE}} might be a Data Layer Variable like 'reviewText'
+- {{CLOUD_FUNCTION_URL}} might be a Constant Variable with your Cloud Function URL
+-->
+
+<script>
+(function() {
+    var xmlHttp = null;
+
+    try {
+        xmlHttp = new XMLHttpRequest();
+    } catch(e) {
+        dataLayer.push({
+            'event': 'XMLHttpRequestError', 
+            'error': e.message
+        });
+        return;
+    }
+
+    if (xmlHttp) {
+        var reviewText = {{REVIEW_TEXT_VARIABLE}};
+
+        if (reviewText) {
+            var sanitizedReview = reviewText
+                .replace(/[^\x20-\x7E]/g, ' ')  // Remove non-printable chars
+                .trim()                         // Remove whitespace
+                .slice(0, 2000);               // Limit length
+            
+            var encodedReview = encodeURIComponent(sanitizedReview);
+            var url = {{CLOUD_FUNCTION_URL}} + '?review=' + encodedReview;
+
+            xmlHttp.open('GET', url, true);
+            console.log('Sending request to Cloud Function:', sanitizedReview);
+
+            xmlHttp.onreadystatechange = function() {
+                if (xmlHttp.readyState === 4) {
+                    if (xmlHttp.status === 200) {
+                        try {
+                            var sentimentData = JSON.parse(xmlHttp.responseText);
+                            console.log('Received sentiment data:', sentimentData);
+
+                            // Safely get nested values
+                            var metrics = sentimentData.metrics || {};
+                            var summary = sentimentData.summary || {};
+                            var aspects = sentimentData.aspects || {};
+
+                            // Prepare data for dataLayer
+                            var result = {
+                                'event': 'reviewSentiment',
+                                'sentimentIndex': metrics.sentiment_index || sentimentData.sentiment_index || 'none',
+                                'positiveAspect': summary.main_positive || sentimentData.positive_aspect || 'none',
+                                'neutralAspect': summary.main_neutral || sentimentData.neutral_aspect || 'none',
+                                'negativeAspect': summary.main_negative || sentimentData.negative_aspect || 'none',
+                                'reviewKeyword': summary.keyword || sentimentData.keyword || 'none',
+                                'allPositiveAspects': aspects.positive || sentimentData.all_positive_aspects || [],
+                                'allNeutralAspects': aspects.neutral || sentimentData.all_neutral_aspects || [],
+                                'allNegativeAspects': aspects.negative || sentimentData.all_negative_aspects || []
+                            };
+
+                            // Push to dataLayer
+                            dataLayer.push(result);
+                            console.log('Successfully pushed to dataLayer:', result);
+
+                        } catch (parseError) {
+                            console.error('Error parsing sentiment response:', parseError);
+                            dataLayer.push({
+                                'event': 'ParseError', 
+                                'error': parseError.message
+                            });
+                        }
+                    } else {
+                        console.error('Request failed:', xmlHttp.status, xmlHttp.responseText);
+                        dataLayer.push({
+                            'event': 'RequestError', 
+                            'status': xmlHttp.status, 
+                            'responseText': xmlHttp.responseText
+                        });
+                    }
+                }
+            };
+
+            // Send the request
+            xmlHttp.send(null);
+        } else {
+            console.error('No review text found in variable');
+            dataLayer.push({'event': 'NoReviewText'});
+        }
+    }
+})();
+</script>
